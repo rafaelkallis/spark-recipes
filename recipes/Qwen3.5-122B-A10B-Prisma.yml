@@ -1,0 +1,47 @@
+model: rdtand/Qwen3.5-122B-A10B-PrismaQuant-4.75bit-vllm
+runtime: vllm
+container: docker.io/eugr/spark-vllm:nightly-20260711
+
+metadata:
+  description: Qwen3.5-122B-A10B PrismaQuant 4.75bit
+  maintainer: Rafael Kallis <rk@rafaelkallis.com>
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: Qwen3.5-122B-A10B
+  reasoning_parser: qwen3
+  tool_call_parser: qwen3_coder
+  gpu_memory_utilization: 0.85
+  kv_cache_dtype: fp8
+  load_format: instanttensor
+  max_model_len: 262144
+  max_num_batched_tokens: 8192
+  max_num_seqs: 4
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  speculative_config: '{"method":"mtp","num_speculative_tokens":3}'
+
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+
+command: |
+  vllm serve {model} \
+      --served-model-name {served_model_name} \
+      --host {host} \
+      --port {port} \
+      --enable-prefix-caching \
+      --enable-chunked-prefill \
+      --trust-remote-code \
+      --enable-auto-tool-choice \
+      --tensor-parallel-size {tensor_parallel} \
+      --pipeline-parallel-size {pipeline_parallel} \
+      --gpu-memory-utilization {gpu_memory_utilization} \
+      --kv-cache-dtype {kv_cache_dtype} \
+      --max-model-len {max_model_len} \
+      --max-num-batched-tokens {max_num_batched_tokens} \
+      --max-num-seqs {max_num_seqs} \
+      --load-format {load_format} \
+      --tool-call-parser {tool_call_parser} \
+      --reasoning-parser {reasoning_parser} \
+      --speculative-config '{speculative_config}'

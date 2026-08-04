@@ -1,0 +1,62 @@
+model: deepseek-ai/DeepSeek-V4-Flash-0731
+runtime: vllm
+container: ghcr.io/rafaelkallis/vllm-eugr-spark:ds4-2026-08-04
+min_nodes: 2
+
+metadata:
+  description: DeepSeek V4 Flash (0731)
+  maintainer: Rafael Kallis <rk@rafaelkallis.com>
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: DeepSeek-V4-Flash
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  data_parallel: 1
+  gpu_memory_utilization: 0.86
+  max_model_len: 1048576
+  max_num_seqs: 4
+  max_num_batched_tokens: 8192
+  # max_num_batched_tokens: 12288
+  # speculative_config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+  speculative_config: '{"method":"dspark","num_speculative_tokens":7,"draft_sample_method":"greedy"}'
+  load_format: instanttensor
+  scheduling_policy: "priority"
+
+env:
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  # VLLM_USE_B12X_MOE: "1"
+  # VLLM_USE_B12X_WO_PROJECTION: "1"
+  # VLLM_TRITON_MLA_SPARSE: "1"
+  # VLLM_USE_V2_MODEL_RUNNER: "1"
+
+command: |
+  vllm serve {model} \
+      --port {port} \
+      --host {host} \
+      --served-model-name {served_model_name} \
+      --trust-remote-code \
+      --tensor-parallel-size {tensor_parallel} \
+      --pipeline-parallel-size {pipeline_parallel} \
+      --data-parallel-size {data_parallel} \
+      --kv-cache-dtype fp8 \
+      --block-size 256 \
+      --gpu-memory-utilization {gpu_memory_utilization} \
+      --max-model-len {max_model_len} \
+      --max-num-seqs {max_num_seqs} \
+      --max-num-batched-tokens {max_num_batched_tokens} \
+      --enable-prefix-caching \
+      --enable-chunked-prefill \
+      --enable-prompt-tokens-details \
+      --tokenizer-mode deepseek_v4 \
+      --tool-call-parser deepseek_v4 \
+      --enable-auto-tool-choice \
+      --reasoning-parser deepseek_v4 \
+      --speculative-config '{speculative_config}' \
+      --load-format {load_format} \
+      --scheduling-policy {scheduling_policy} \
+      --kv-cache-metrics \
+      --cudagraph-metrics
