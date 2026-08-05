@@ -39,6 +39,7 @@ sparkrun run @rafaelkallis/DeepSeek-V4-Flash
 | Recipe | Model | Description |
 | --- | --- | --- |
 | `DeepSeek-V4-Flash` | [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) | Sparse MoE Flash model with DeepSeek endogenous speculative decoding and instanttensor load |
+| `DeepSeek-V4-Flash-b12x` | [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) | DeepSeek V4 Flash on the b12X kernel stack (Wo projection, MoE, fp8 GEMM, sparse MLA) |
 | `Qwen3.5-122B-A10B-Prisma` | [`rdtand/Qwen3.5-122B-A10B-PrismaQuant-4.75bit-vllm`](https://huggingface.co/rdtand/Qwen3.5-122B-A10B-PrismaQuant-4.75bit-vllm) | Qwen3.5 MoE model, Prisma-quantized to 4.75 bits, with MTP draft model |
 
 ### `DeepSeek-V4-Flash`
@@ -51,6 +52,19 @@ The smallest member of the DeepSeek-V4 family, designed as a single-rack Flash m
 - **Speculative decoding:** endogenous DeepSeek draft model (`dspark`, 7 speculative tokens, greedy)
 - **KV cache:** fp8 at block size 256
 - **Model loading:** `instanttensor` for fast startup
+
+### `DeepSeek-V4-Flash-b12x`
+
+DeepSeek V4 Flash tuned for the b12X kernel stack (same 0731 checkpoint as the base recipe).
+
+- **Runtime:** vLLM (b12X container `docker.io/eugr/spark-vllm-b12x:latest`)
+- **Nodes:** 2 (tensor parallel 2, pipeline parallel 1)
+- **Context:** up to 1M tokens
+- **b12X kernels:** Wo projection (`VLLM_USE_B12X_WO_PROJECTION`), MoE with forced A8 (`VLLM_USE_B12X_MOE` / `B12X_MOE_FORCE_A8`) enabling `--moe-backend b12x` + `--linear-backend b12x`, fp8 GEMM (`VLLM_USE_B12X_FP8_GEMM`), sparse MLA indexer (`VLLM_USE_B12X_SPARSE_INDEXER` / `B12X_MLA_SM120_UNIFIED`), and MHC
+- **Speculative decoding:** endogenous DeepSeek draft model (`dspark`, 5 speculative tokens, probabilistic, `B12X_MLA_SPARSE` attention)
+- **KV cache:** fp8 at block size 256
+- **Model loading:** `instanttensor`
+- **Compilation:** AOT compile with `FULL_AND_PIECEWISE` cudagraph mode
 
 ### `Qwen3.5-122B-A10B-Prisma`
 
@@ -70,6 +84,7 @@ A 122B-parameter MoE serving with only 10B active parameters per token.
   registry.yaml   # registry manifest (name: rafaelkallis)
 recipes/
   DeepSeek-V4-Flash.yml
+  DeepSeek-V4-Flash-b12x.yml
   Qwen3.5-122B-A10B-Prisma.yml
 README.md
 ```
