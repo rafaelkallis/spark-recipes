@@ -15,15 +15,17 @@ defaults:
   pipeline_parallel: 1
   data_parallel: 1
   gpu_memory_utilization: 0.85
+  kv_cache_dtype: fp8_ds_mla
   max_model_len: 1048576
-  max_num_seqs: 8
-  max_num_batched_tokens: 8192
+  max_num_seqs: 6
+  max_num_batched_tokens: 4096
   max_cudagraph_capture_size: 64
-  # num_speculative_tokens: 5
+  num_speculative_tokens: 5
+  max_cudagraph_capture_size: 64
+  long_prefill_token_threshold: 1024
 
 env:
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
-
   CUTE_DSL_ARCH: "sm_121a"
   VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
@@ -38,6 +40,8 @@ env:
   VLLM_USE_V2_MODEL_RUNNER: "1"
   B12X_MLA_SM120_UNIFIED: "1"
   B12X_MOE_FORCE_A8: "1"
+  # https://forums.developer.nvidia.com/t/instructions-for-running-deepseek-v4-flash-with-dspark-using-eugrs-repo/376220/45?u=rafaelkallis
+  VLLM_PREFIX_CACHE_RETENTION_INTERVAL: "4096"
 
 # --default-chat-template-kwargs.thinking=true \
 # --default-chat-template-kwargs.reasoning_effort=high \
@@ -52,7 +56,7 @@ command: |
       --tensor-parallel-size {tensor_parallel} \
       --pipeline-parallel-size {pipeline_parallel} \
       --data-parallel-size {data_parallel} \
-      --kv-cache-dtype fp8 \
+      --kv-cache-dtype {kv_cache_dtype} \
       --block-size 256 \
       --max-model-len {max_model_len} \
       --max-num-seqs {max_num_seqs} \
@@ -72,7 +76,7 @@ command: |
       --attention-backend B12X_MLA_SPARSE \
       --max-cudagraph-capture-size {max_cudagraph_capture_size} \
       --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}' \
-      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","attention_backend":"B12X_MLA_SPARSE"}' \
+      --speculative-config '{"method":"dspark","num_speculative_tokens":{num_speculative_tokens},"draft_sample_method":"probabilistic","attention_backend":"B12X_MLA_SPARSE"}' \
       --scheduling-policy priority \
       --kv-cache-metrics \
       --cudagraph-metrics
