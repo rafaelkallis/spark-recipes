@@ -41,6 +41,7 @@ sparkrun run @rafaelkallis/DeepSeek-V4-Flash
 | `DeepSeek-V4-Flash` | [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) | Sparse MoE Flash model with DeepSeek endogenous speculative decoding and instanttensor load |
 | `DeepSeek-V4-Flash-b12x` | [`deepseek-ai/DeepSeek-V4-Flash-0731`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) | DeepSeek V4 Flash on the b12X kernel stack (Wo projection, MoE, fp8 GEMM, sparse MLA) |
 | `Qwen3.5-122B-A10B-Prisma` | [`rdtand/Qwen3.5-122B-A10B-PrismaQuant-4.75bit-vllm`](https://huggingface.co/rdtand/Qwen3.5-122B-A10B-PrismaQuant-4.75bit-vllm) | Qwen3.5 MoE model, Prisma-quantized to 4.75 bits, with MTP draft model |
+| `Nemotron-3-Embed-1B-NVFP4` | [`nvidia/Nemotron-3-Embed-1B-NVFP4`](https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4) | NVIDIA Nemotron 3 Embed text embedding model, NVFP4-quantized, multilingual retrieval |
 
 ### `DeepSeek-V4-Flash`
 
@@ -77,6 +78,17 @@ A 122B-parameter MoE serving with only 10B active parameters per token.
 - **KV cache:** fp8
 - **Model loading:** `instanttensor`
 
+### `Nemotron-3-Embed-1B-NVFP4`
+
+A single-node multilingual text embedding model for retrieval, NVFP4-quantized.
+
+- **Runtime:** vLLM
+- **Nodes:** 1
+- **Context:** 4K tokens (chunk sizes are expected to stay under 2k)
+- **Quantization:** NVFP4 with pooling metadata read automatically from the checkpoint
+- **CUDA graphs:** capture capped at 256 tokens (`--max-cudagraph-capture-size 256`)
+- **Serve endpoints:** `/v2/embed` (recommended) and OpenAI-compatible `/v1/embeddings`
+
 ## Repository Layout
 
 ```
@@ -86,6 +98,7 @@ recipes/
   DeepSeek-V4-Flash.yml
   DeepSeek-V4-Flash-b12x.yml
   Qwen3.5-122B-A10B-Prisma.yml
+  Nemotron-3-Embed-1B-NVFP4.yml
 README.md
 ```
 

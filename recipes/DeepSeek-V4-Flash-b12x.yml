@@ -21,7 +21,6 @@ defaults:
   max_num_batched_tokens: 4096
   max_cudagraph_capture_size: 64
   num_speculative_tokens: 5
-  max_cudagraph_capture_size: 64
   long_prefill_token_threshold: 1024
 
 env:

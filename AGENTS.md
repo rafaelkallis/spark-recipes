@@ -63,6 +63,14 @@ the `vllm` runtime and typically declare:
 - When adding commented-out alternatives (e.g. multiple container tags or speculative
   configs), keep them above the active line with `# ` annotations, as the existing
   recipes do.
+- Never repeat a `defaults` key — YAML silently uses the last occurrence, so a
+  duplicate key is a dead line that hides drift (e.g. a double
+  `max_cudagraph_capture_size`).
+- For embedding/pooling recipes, cap `max_cudagraph_capture_size` to the expected
+  batch-1 context (e.g. 256 for 4k context) — vLLM generates capture sizes up to that
+  bound, so values past the max context only add startup time. sparkrun does **not**
+  set `VLLM_CACHE_ROOT`; vLLM's compile/FP4-GEMM autotune cache is not persisted
+  across launches out of the box.
 
 ## Recipe discovery rules
 
