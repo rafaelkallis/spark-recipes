@@ -1,6 +1,6 @@
 model: deepseek-ai/DeepSeek-V4-Flash-0731
 runtime: vllm
-container: docker.io/eugr/spark-vllm-b12x:latest
+container: docker.io/eugr/spark-vllm-b12x:nightly-20260813
 min_nodes: 2
 
 metadata:
