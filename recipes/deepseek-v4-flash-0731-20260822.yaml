@@ -4,7 +4,7 @@ container: docker.io/eugr/spark-vllm-b12x:nightly-20260810
 min_nodes: 2
 
 metadata:
-  description: DeepSeek V4 Flash (0731 Checkpoint) with b12X kernel support
+  description: DeepSeek V4 Flash 0731 (2026-08-22)
   maintainer: Rafael Kallis <rk@rafaelkallis.com>
 
 defaults:

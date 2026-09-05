@@ -1,10 +1,10 @@
 model: deepseek-ai/DeepSeek-V4-Flash-0731
 runtime: vllm
-container: docker.io/eugr/spark-vllm:nightly-20260820
+container: docker.io/eugr/spark-vllm-b12x:nightly-20260903
 min_nodes: 2
 
 metadata:
-  description: DeepSeek V4 Flash (0731)
+  description: DeepSeek V4 Flash 0731 (2026-09-04)
   maintainer: Rafael Kallis <rk@rafaelkallis.com>
 
 defaults:
@@ -16,18 +16,31 @@ defaults:
   kv_cache_dtype: fp8
   block_size: 256
   max_model_len: 1048576
-  max_num_seqs: 6
-  max_num_batched_tokens: 8192
-  # https://forums.developer.nvidia.com/t/instructions-for-running-deepseek-v4-flash-with-dspark-using-eugrs-repo/376220/45?u=rafaelkallis
-  # prefix_cache_retention_interval: 4096
+  max_num_seqs: 8
+  max_num_batched_tokens: 4096
+  max_cudagraph_capture_size: 48
   num_speculative_tokens: 5
+  long_prefill_token_threshold: 1024
   thinking: "true"
   reasoning_effort: "high"
   scheduling_policy: "priority"
 
 env:
+  CUTE_DSL_ARCH: "sm_121a"
+  VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
-  VLLM_PREFIX_CACHE_RETENTION_INTERVAL: "4096"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  VLLM_MEMORY_PROFILE_INCLUDE_ATTN: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  VLLM_USE_B12X_WO_PROJECTION: "1"
+  VLLM_USE_B12X_MHC: "1"
+  VLLM_USE_B12X_FP8_GEMM: "1"
+  VLLM_USE_B12X_MOE: "1"
+  VLLM_USE_B12X_SPARSE_INDEXER: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_MOE_SKIP_PADDING: "0"
+  B12X_MLA_SM120_UNIFIED: "1"
+  B12X_MOE_FORCE_A8: "1"
 
 command: |
   vllm serve {model} \
@@ -38,12 +51,11 @@ command: |
       --tensor-parallel-size {tensor_parallel} \
       --kv-cache-dtype {kv_cache_dtype} \
       --block-size {block_size} \
-      --gpu-memory-utilization {gpu_memory_utilization} \
       --max-model-len {max_model_len} \
       --max-num-seqs {max_num_seqs} \
       --max-num-batched-tokens {max_num_batched_tokens} \
+      --gpu-memory-utilization {gpu_memory_utilization} \
       --enable-prefix-caching \
-      --prefix-cache-retention-interval {prefix_cache_retention_interval} \
       --enable-chunked-prefill \
       --enable-prompt-tokens-details \
       --tokenizer-mode deepseek_v4 \
@@ -51,10 +63,15 @@ command: |
       --enable-auto-tool-choice \
       --reasoning-parser deepseek_v4 \
       --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"","reasoning_end_str":""}' \
-      --speculative-config '{"method":"dspark","num_speculative_tokens":{num_speculative_tokens},"draft_sample_method":"greedy"}' \
+      --moe-backend b12x \
+      --linear-backend b12x \
+      --attention-backend B12X \
+      --max-cudagraph-capture-size {max_cudagraph_capture_size} \
+      --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}' \
+      --speculative-config '{"method":"dspark","num_speculative_tokens":{num_speculative_tokens},"draft_sample_method":"probabilistic","attention_backend":"B12X"}' \
       --default-chat-template-kwargs.thinking={thinking} \
       --default-chat-template-kwargs.reasoning_effort={reasoning_effort} \
-      --load-format instanttensor \
       --scheduling-policy {scheduling_policy} \
+      --load-format instanttensor \
       --kv-cache-metrics \
       --cudagraph-metrics
