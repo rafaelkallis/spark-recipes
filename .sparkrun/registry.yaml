@@ -1,3 +1,6 @@
 registries:
   - name: rafaelkallis
     description: Rafael's recipes
+    recipes: recipes
+    mods: mods
+    
