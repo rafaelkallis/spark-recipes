@@ -68,9 +68,16 @@ the `vllm` runtime and typically declare:
   `max_cudagraph_capture_size`).
 - For embedding/pooling recipes, cap `max_cudagraph_capture_size` to the expected
   batch-1 context (e.g. 256 for 4k context) — vLLM generates capture sizes up to that
-  bound, so values past the max context only add startup time. sparkrun does **not**
-  set `VLLM_CACHE_ROOT`; vLLM's compile/FP4-GEMM autotune cache is not persisted
-  across launches out of the box.
+  bound, so values past the max context only add startup time.
+- sparkrun's runtime cache is on by default (`/cache/runtime` in-container) and it
+  already exports `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `FLASHINFER_WORKSPACE_BASE`/
+  `FLASHINFER_CACHE_DIR`, `CUTE_DSL_CACHE_DIR`, `TORCH_HOME`, `TORCH_EXTENSIONS_DIR`,
+  `TORCHINDUCTOR_CACHE_DIR` and `FLASH_ATTENTION_CUTE_DSL_CACHE_DIR`. Do not re-declare
+  those in a recipe. Caches sparkrun does *not* manage (e.g. `TILELANG_CACHE_DIR`,
+  `B12X_CUTE_COMPILE_CACHE_DIR`) default to `$HOME` inside the image and are lost on
+  container recreate — point them at `/cache/runtime/<name>` in `env:`.
+- The HF cache is mounted at `/cache/huggingface`, so upstream projects that hardcode
+  that path (e.g. MiaAI-Lab's compose) port into mods without path rewriting.
 
 ## Recipe discovery rules
 
