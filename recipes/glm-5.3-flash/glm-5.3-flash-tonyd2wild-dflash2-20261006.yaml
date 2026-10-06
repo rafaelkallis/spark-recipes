@@ -1,0 +1,113 @@
+recipe_version: 2
+metadata:
+  description: >-
+    GLM-5.3-Flash-NVFP4 + DFlash2 (k=7) speculative decoding, 2x DGX Spark TP2,
+    on tonyd2wild's public v11-dflash2 image. Mirrors upstream
+    launch-glm53-vllm-tp2-dflash2.sh (the 46.9 tok/s configuration, 2026-09-18
+    speed night): sm121 kpool crash fix + #18 prefix-cache repair via the
+    tonyd2wild-20261006 mod. Not the knapcio TP4 port (runs/2026-09-29
+    RUNBOOK): that stack needs a locally-built RoCEnante image and
+    locally-converted weights.
+  maintainer: rafaelkallis
+
+model: nvidia/GLM-5.3-Flash-NVFP4
+runtime: vllm
+# Public, anonymously pullable GHCR image (vLLM 0.1.dev20051+g487ecf187 +
+# glm5_next DFlash2 patches). Contains only vLLM + patches — no weights.
+container: ghcr.io/tonyd2wild/vllm-glm53-flash:sm121-v11-dflash2
+
+min_nodes: 2
+max_nodes: 2
+
+# SM121 kpool crash fix + prefix-cache repair for the DFlash2 draft group,
+# staged as launch-time bind mounts by the upstream launcher; a mod is how the
+# same two files land in a sparkrun container.
+mods:
+  - tonyd2wild-20261006
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.85
+  max_model_len: 262144
+  kv_cache_dtype: fp8_e4m3
+  # 8 GiB/rank KV pin (upstream speed-night 09-18 hardening, 6 -> 8 GiB).
+  max_num_seqs: 6
+  max_num_batched_tokens: 4096
+  num_speculative_tokens: 7
+
+env:
+  # ---- GPU / arch (GB10 = sm_121) ----
+  TORCH_CUDA_ARCH_LIST: 12.1a
+  FLASHINFER_CUDA_ARCH_LIST: 12.1a
+  FLASHINFER_DISABLE_VERSION_CHECK: '1'
+  # ---- JIT storm control (2026-09-18: default MAX_JOBS hit the OOM killer on
+  # the post-load profile; keep to 2 concurrent nvcc jobs) ----
+  MAX_JOBS: '2'
+  FLASHINFER_NVCC_THREADS: '1'
+  # Not managed by the sparkrun runtime cache -> lived in $HOME in the image
+  # and was lost on recreate. TRITON/FLASHINFER caches are sparkrun-managed;
+  # do not re-declare them here.
+  TILELANG_CACHE_DIR: /cache/runtime/tilelang
+  VLLM_ENGINE_READY_TIMEOUT_S: '3600'
+
+executor_config:
+  entrypoint: ""
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --tensor-parallel-size {tensor_parallel} \
+    --distributed-executor-backend mp \
+    --trust-remote-code \
+    --dtype bfloat16 \
+    --moe-backend marlin \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --block-size 2304 \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --kv-cache-memory 6442450944 \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --no-enable-flashinfer-autotune \
+    --speculative-config '{"method":"dflash","model":"incoai/GLM-5.3-Flash-DFlash2","num_speculative_tokens":{num_speculative_tokens}}' \
+    --disable-custom-all-reduce \
+    --compilation-config '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,12,14,15,16,18,20,21,22,24,25,26,27,28,30,32,33,35,36,39,40,42,44,45,48,49,50,52,54,55,56,60,63,64,65,66,70,72,75,77,78,80,84,88,90,91,96,98,104,105,112,120,128],"max_cudagraph_capture_size":128}' \
+    --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 \
+    --default-chat-template-kwargs '{"enable_thinking":false}' \
+    --limit-mm-per-prompt '{"image":2,"video":0}' \
+    --mm-processor-cache-gb 1 --mm-processor-kwargs '{"max_pixels":6422528,"max_image_tokens":4096}'
+
+# Notes:
+# - sparkrun pre-syncs the drafter from the speculative_config model field (full
+#   HF recipe) alongside the target weights; CC BY-NC-ND — cache locally, do not
+#   redistribute derived copies.
+# - chat template: the model's bundled chat_template.jinja is picked up by
+#   vLLM automatically (upstream mounts chat_template_mm.jinja for the
+#   multimodal-only template; the bundled one covers text + images).
+# - sparkrun appends --nnodes/--node-rank/--master-addr/--headless for TP2 and
+#   manages the RoCE/NCCL comm env (never hardcode those here).
+# - 6 GiB KV is the knapcio env.tp2-high qualified value; observed to dodge the
+#   NVRM unified-memory fragmentation crash on large prefills (silent worker
+#   death on first ~8k-token request, both nodes NVRM OOM bursts, 2026-10-06).
+#   The 8 GiB speed-night value died twice with the same signature.
+# - max_num_batched_tokens 4096 matches env.tp2-high (was 8192) — smaller
+#   prefill chunks shrink the transient allocation that triggers the
+#   fragmentation death.
+# - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is sparkrun-managed; do
+#   not re-declare it here.
+# - knapcio env.tp2-high deltas ported (2026-10-06):
+#   cudagraphs FULL_DECODE_ONLY with their 128-row capture table
+#   (max_cudagraph_capture_size 128 — graphs above 128 rows only serve 28+
+#   concurrent requests), --disable-custom-all-reduce, and the trimmed image
+#   budget (mm-processor-cache-gb 1, max_pixels/max_image_tokens caps) that
+#   makes the 6 GiB KV pin safe.
+# - Still NOT ported (need the local overlay/image — see the tonyd2wild-20261006
+#   mod README): adaptive draft scheduler (--scheduler-cls), RoCEnante all-reduce
+#   bundle, FP8 drafter/lossless8 weights, fast loader, boot-warm ritual.
