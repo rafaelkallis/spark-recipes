@@ -1,0 +1,92 @@
+model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
+# model: local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD
+runtime: vllm
+# https://github.com/local-inference-lab/blackwell-llm-docker/pkgs/container/vllm
+# container: ghcr.io/local-inference-lab/vllm:karmic-kraken-beta-spark-20261007-cdcdf9eea1e11b16
+container: ghcr.io/local-inference-lab/vllm:karmic-kraken-beta-spark-20261007-d071fb3dde0ba979
+min_nodes: 2
+
+executor_config:
+  cap_add:
+    - "IPC_LOCK"
+  ulimit:
+    - "memlock=-1:-1"
+    - "nofile=65535:65535"
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  decode_context_parallel: 1
+  max_model_len: 1048576
+  max_num_seqs: 8
+  max_num_batched_tokens: 4096
+  kv_cache_dtype: fp8
+  # kv_cache_memory_bytes: 9126805504 # 8.5 GB
+  kv_cache_memory_bytes: 8589934592 # 8 GB
+  gpu_memory_utilization: 0.83
+
+command: |
+  vllm serve {model} \
+    --additional-config '{
+      "glm53_kda_decode_backend": "auto",
+      "kda_prefill_backend": "b12x"
+    }' \
+    --attention-backend B12X \
+    --block-size 256 \
+    --compilation-config '{
+      "cudagraph_mode": "FULL_AND_PIECEWISE"
+    }' \
+    --cp-kv-cache-interleave-size 4 \
+    --cudagraph-capture-sizes 1 2 4 8 12 16 20 24 28 32 \
+    --dcp-kv-cache-interleave-size 4 \
+    --decode-context-parallel-size {decode_context_parallel} \
+    --default-chat-template-kwargs '{
+      "reasoning_effort": "high",
+      "clear_thinking": false
+    }' \
+    --dtype bfloat16 \
+    --enable-auto-tool-choice \
+    --enable-chunked-prefill \
+    --no-enable-flashinfer-autotune \
+    --enable-prefix-caching \
+    --enable-prompt-tokens-details \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --host {host} \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --linear-backend b12x \
+    --load-format instanttensor \
+    --mamba-cache-mode align \
+    --max-cudagraph-capture-size 32 \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --max-parallel-prefills 1 \
+    --moe-backend b12x \
+    --override-generation-config '{
+      "temperature": 1.0,
+      "top_p": 0.95
+    }' \
+    --pipeline-parallel-size {pipeline_parallel} \
+    --port {port} \
+    --prefill-compute-share 0.4 \
+    --prefill-schedule-interval 1 \
+    --quantization modelopt_mixed \
+    --reasoning-parser glm45 \
+    --recurrent-checkpoint-policy request_boundaries \
+    --served-model-name {served_model_name} \
+    --speculative-config '{
+      "method": "mtp",
+      "draft_sample_method": "probabilistic",
+      "rejection_sample_method": "standard",
+      "moe_backend": "b12x",
+      "attention_backend": "B12X",
+      "num_speculative_tokens": 3
+    }' \
+    --tensor-parallel-size {tensor_parallel} \
+    --tool-call-parser glm47 \
+    --limit-mm-per-prompt '{"image":8,"video":0}' \
+    --mm-processor-cache-gb 1

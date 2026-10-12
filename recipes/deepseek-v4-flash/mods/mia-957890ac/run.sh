@@ -79,6 +79,6 @@ bash "$ROOT/entrypoint.sh"
 if [ -f "$VLLM_ROOT/tokenizers/deepseek_v4_encoding.py" ]; then
   log "OK — encoder installed, all hotfixes applied"
 else
-  echo "dspark-mod: FATAL: encoding_dsv4.py not found (set DSPARK_ENCODING_FILE, or check DSPARK_MODEL/DSPARK_REVISION)" >&2
+  echo "dspark-mod: FATAL: $VLLM_ROOT/tokenizers/deepseek_v4_encoding.py not found (set DSPARK_ENCODING_FILE, or check DSPARK_MODEL/DSPARK_REVISION)" >&2
   exit 1
 fi

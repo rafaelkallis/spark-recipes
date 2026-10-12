@@ -1,0 +1,104 @@
+# https://github.com/eugr/spark-vllm-docker/blob/a33f4b5c0c15cd8b40d7f0d0d92db8214a54d54a/recipes/glm-5.3-flash.yaml
+
+model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
+runtime: vllm
+container: eugr/spark-vllm-b12x:nightly-20261007
+min_nodes: 2
+
+executor_config:
+  restart_policy: unless-stopped
+  cap_add:
+    - "IPC_LOCK"
+    - "SYS_NICE"
+  security_opt:
+    - "seccomp=unconfined"
+  # ulimit:
+  #   - "memlock=-1:-1"
+  #   - "nofile=65535:65535"
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  max_model_len: 1048576
+  max_num_seqs: 8
+  max_num_batched_tokens: 4096
+  # kv_cache_memory_bytes: 9126805504 # 8.5 GB
+  kv_cache_memory_bytes: 8589934592 # 8 GB
+  kv_cache_dtype: fp8
+  gpu_memory_utilization: 0.85
+
+env:
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
+  B12X_COMPILE_WORKERS: "4"
+  CUTE_DSL_ARCH: "sm_121a"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "1"
+
+  # runtime
+  SAFETENSORS_FAST_GPU: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+
+  B12X_POLICY_MODE: "auto"
+  VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE: "auto"
+  VLLM_GLM53_MTP_DRAFT_HEAD: "nvfp4"
+
+  # INSTANTTENSOR_BACKEND: "BUFFERED"
+  # INSTANTTENSOR_BUFFER_SIZE: "67108864"
+  # INSTANTTENSOR_CHUNK_SIZE: "8388608"
+  # INSTANTTENSOR_CONCURRENCY: "1"
+  # INSTANTTENSOR_IO_DEPTH: "v3"
+
+  # https://github.com/eugr/spark-vllm-docker/issues/416
+  # --recurrent-checkpoint-policy aligned
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --tensor-parallel-size {tensor_parallel} \
+    --pipeline-parallel-size 1 \
+    --decode-context-parallel-size 1 \
+    --mamba-cache-mode align \
+    --enable-prefix-caching \
+    --enable-prompt-tokens-details \
+    --enable-chunked-prefill \
+    --dtype bfloat16 \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --quantization modelopt_mixed \
+    --attention-backend B12X \
+    --block-size 256 \
+    --moe-backend b12x \
+    --linear-backend b12x \
+    --no-enable-flashinfer-autotune \
+    --kda-prefill-backend b12x \
+    --load-format instanttensor \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --cudagraph-capture-sizes 1 2 4 8 12 16 20 24 28 32 \
+    --max-cudagraph-capture-size 32 \
+    --kda-prefill-backend b12x \
+    --reasoning-parser glm45 --tool-call-parser glm47 --enable-auto-tool-choice \
+    --speculative-config '{
+      "method": "mtp",
+      "draft_sample_method": "probabilistic",
+      "rejection_sample_method": "standard",
+      "moe_backend": "b12X",
+      "attention_backend": "B12X",
+      "num_speculative_tokens": 3
+    }' \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --limit-mm-per-prompt '{
+      "image": 8,
+      "video":0
+    }' \
+    --mm-processor-cache-gb 1 \ 
+    --scheduling-policy priority

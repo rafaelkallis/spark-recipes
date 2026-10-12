@@ -47,9 +47,6 @@
 recipe_version: "2"
 model: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
 runtime: vllm
-# Same digest-pinned public base as the text recipe. The recipe reproduces tonyd2wild's
-# `vllm-dspark-runtime:dspark-nvfp4-stage-c` runtime in-container (overlay -> nvfp4 stages)
-# and then injects the vision port on top. No manual image build, no private image.
 container: ghcr.io/bjk110/vllm-spark@sha256:d8492e7677cf1b9aaa3344e0e6865efc468454013eee5ebabac85be90af027be
 min_nodes: 2
 max_nodes: 2
@@ -69,9 +66,8 @@ defaults:
   host: 0.0.0.0
   tensor_parallel: 2
   pipeline_parallel: 1
-  served_model_name: deepseek-v4-flash-vision-exp
+  served_model_name: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
   kv_cache_dtype: nvfp4_ds_mla
-  block_size: 256
   # 1M = the model's calibrated YaRN ceiling (65536 x factor 16). The vision-exp-default
   # branch also validated 1500000 at gmu 0.85 (KV pool ~2.9M tokens) if you want to push
   # it — but 1M is calibrated and matches the text recipe.
@@ -82,19 +78,10 @@ defaults:
   max_num_seqs: 12
   max_num_batched_tokens: 8192
   gpu_memory_utilization: 0.85
-  tokenizer_mode: deepseek_v4
-  tool_call_parser: deepseek_v4
-  reasoning_parser: deepseek_v4
   # k=5 — the validated default with Patch 4 mounted. Do not swap to k=3; see the header
   # comment and issue #48 (the k=3 A/B was an unpatched measurement, now retracted).
-  speculative_config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
-  reasoning_config: '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
-  # Vision-Exp ships NO Jinja chat template (encoding/ scripts only), so the runtime
-  # builds the prompt from the deepseek_v4 tokenizer. thinking:false = throughput-
-  # optimized (the deployed-vision default). To enable reasoning, set
-  #   chat_template_kwargs: '{"thinking":true,"reasoning_effort":"high"}'
-  # (top-level reasoning_effort is ignored; levels low/high/max.)
-  chat_template_kwargs: '{"thinking":false}'
+  num_speculative_tokens: 5
+  chat_template_kwargs: '{"thinking":true,"reasoning_effort":"high"}'
 
 benchmark:
   framework: llama-benchy
@@ -160,6 +147,14 @@ env:
 
 executor_config:
   shm_size: 64gb
+  user: root
+  cap_add:
+    - IPC_LOCK
+    - SYS_PTRACE
+  ulimit:
+    - memlock=-1:-1
+    - stack=67108864
+    - nofile=65535:65535
 
 # Reproduce the dspark-nvfp4-stage-c runtime in-container, then inject the vision port.
 # Everything is fetched from THIS repo so the recipe is self-contained and pinned.
@@ -314,7 +309,7 @@ command: |
     --tensor-parallel-size {tensor_parallel} \
     --pipeline-parallel-size {pipeline_parallel} \
     --kv-cache-dtype {kv_cache_dtype} \
-    --block-size {block_size} \
+    --block-size 256 \
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
@@ -322,13 +317,13 @@ command: |
     --enable-prefix-caching \
     --async-scheduling \
     --enable-chunked-prefill \
-    --speculative-config '{speculative_config}' \
-    --tokenizer-mode {tokenizer_mode} \
+    --speculative-config '{"method":"dspark","num_speculative_tokens":{num_speculative_tokens},"draft_sample_method":"probabilistic"}' \
+    --tokenizer-mode deepseek_v4 \
     --distributed-executor-backend mp \
-    --tool-call-parser {tool_call_parser} \
+    --tool-call-parser deepseek_v4 \
     --enable-auto-tool-choice \
-    --reasoning-parser {reasoning_parser} \
-    --reasoning-config '{reasoning_config}' \
+    --reasoning-parser deepseek_v4 \
+    --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
     --default-chat-template-kwargs '{chat_template_kwargs}' \
     --generation-config vllm \
     --enable-flashinfer-autotune

@@ -26,17 +26,19 @@ and uses upstream's patch sources unmodified. Do not mix them in one recipe.
 ## Provenance contract
 
 Every model-affecting step in `run.sh` comes from the MiaAI repo at the pin:
-the patch tree is **fetched and digest-verified**, and the reasoning-effort
-snippet is the entrypoint's inline python kept byte-identical. Audited
-2026-09-07 against the extracted compose entrypoint: all 18 invoked hotfix
-files appear in upstream's own sequence (same order), and every recipe env
-variable is upstream-defined.
+the patch tree is **fetched and digest-verified**, and the pre-serve portion
+of the compose entrypoint is **extracted and executed verbatim** — no hotfix
+or inline python is hand-copied. Audited 2026-09-07 against the extracted
+compose entrypoint: all 18 invoked hotfix files appear in upstream's own
+sequence (same order), and every env variable the entrypoint consumes is
+upstream-defined.
 
 The only locally-authored pieces are launch plumbing, not model content:
 
 - the cache → pinned-fetch resolver (how the mod obtains upstream content),
 - the **fail-closed encoder guard** — upstream WARNs and boots without the
-  encoder; here a missing `encoding_dsv4.py` aborts the launch instead.
+  encoder; here a missing in-vLLM `deepseek_v4_encoding.py` aborts the launch
+  instead.
 
 Any future model-behavior customization (own hotfixes, adapted sources) must
 live in a **separate mod**, never in this one — see
@@ -47,7 +49,7 @@ that rule.
 
 | Path | Provenance |
 | --- | --- |
-| `run.sh` | Ours. Resolves the patch tree (cache → pinned fetch), then ports the always-on portion of the compose entrypoint — including the entrypoint's inline `python3 -c` reasoning-effort snippet, kept byte-identical in a heredoc. |
+| `run.sh` | Ours. Resolves the patch tree (cache → pinned fetch), stages the compose volume bindings, extracts the pre-serve portion of the compose entrypoint, and executes it verbatim. |
 
 ## How `run.sh` works
 
@@ -98,7 +100,7 @@ pinned compose, not this file.
 
 ### Environment
 
-Read from the recipe's `env` block:
+Available at launch (recipe `env` block, or upstream default):
 
 | Variable | Effect |
 | --- | --- |
@@ -107,8 +109,10 @@ Read from the recipe's `env` block:
 | `DSPARK_REVISION` | Preferred snapshot revision. Should match the recipe's `revision`. |
 | `DSPARK_ENCODING_FILE` | Explicit override for the encoder path. |
 | `VLLM_ROOT` | vLLM tree. Default `/usr/local/lib/python3.12/dist-packages/vllm`. |
-| `DSPARK_HF_HUB_DIR` | HF hub dir. Default `/cache/huggingface/hub`, which is where sparkrun mounts it. |
 | `DSPARK_SKIP_*`, `DSPARK_ENABLE_*`, `DSPARK_API_KEYS`, … | Upstream's own entrypoint env; all honored as upstream defines them. |
+
+Upstream hardcodes the HF hub path (`/cache/huggingface/hub`) — there is no
+`DSPARK_HF_HUB_DIR` knob; sparkrun mounts the HF cache there.
 
 ## Bumping the pin
 

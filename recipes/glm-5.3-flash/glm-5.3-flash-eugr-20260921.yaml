@@ -1,11 +1,10 @@
 # Recipe: GLM-5.3-Flash-NVFP4-Spark
 # GLM 5.3 Flash using the B12X-optimized serving stack on a dual DGX Spark cluster
-# https://github.com/eugr/spark-vllm-docker/blob/main/recipes/glm-5.3-flash.yaml
+# https://github.com/eugr/spark-vllm-docker/blob/a33f4b5c0c15cd8b40d7f0d0d92db8214a54d54a/recipes/glm-5.3-flash.yaml
 
 model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
 runtime: vllm
-container: docker.io/eugr/spark-vllm-b12x:nightly-20260903
-# container: docker.io/eugr/spark-vllm-b12x:nightly-20260906
+container: eugr/spark-vllm-b12x:nightly-20260919
 min_nodes: 2
 
 metadata:
@@ -14,18 +13,19 @@ metadata:
 defaults:
   port: 8000
   host: 0.0.0.0
-  served_model_name: GLM-5.3-Flash
+  served_model_name: zai-org/GLM-5.3-Flash
   tensor_parallel: 2
   pipeline_parallel: 1
   decode_context_parallel: 1
   block_size: 256
-  max_model_len: 1048576
+  # max_model_len: 1048576
+  max_model_len: 262244
   max_num_seqs: 4
   max_num_batched_tokens: 4096
   num_speculative_tokens: 5
   kv_cache_memory_bytes: 8G
   kv_cache_dtype: fp8
-  gpu_memory_utilization: 0.87
+  gpu_memory_utilization: 0.85
 
 env:
   CUTE_DSL_ARCH: "sm_121a"
@@ -44,6 +44,7 @@ env:
   INSTANTTENSOR_CHUNK_SIZE: "8388608"
   INSTANTTENSOR_CONCURRENCY: "1"
   INSTANTTENSOR_IO_DEPTH: "3"
+
 
 command: |
   vllm serve {model} \
@@ -68,7 +69,7 @@ command: |
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
-    --speculative-config '{"method":"mtp","num_speculative_tokens":{num_speculative_tokens},"moe_backend":"humming","attention_backend":"B12X"}' \
+    --speculative-config '{"method":"dflash","model":"incoai/GLM-5.3-Flash-DFlash2","num_speculative_tokens":{num_speculative_tokens}}' \
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \

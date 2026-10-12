@@ -1,0 +1,90 @@
+# https://github.com/eugr/spark-vllm-docker/blob/a33f4b5c0c15cd8b40d7f0d0d92db8214a54d54a/recipes/glm-5.3-flash.yaml
+# https://github.com/local-inference-lab/vllm/blob/6afb99982576a7a2eb53d667189e859629e22739/scripts/serve-glm53-flash-nvfp4-tp2-rdma.sh
+
+model: nvidia/GLM-5.3-Flash-NVFP4
+runtime: vllm
+container: eugr/spark-vllm-b12x:nightly-20260924
+min_nodes: 2
+
+# b12x's checkpoint loader uses io_uring for weight reads, which needs
+# IPC_LOCK + unconfined seccomp under sparkrun's rootless docker mode
+# (same opts the Atlas runtime declares for its io_uring path).
+executor_config:
+  cap_add:
+    - "IPC_LOCK"
+    - "SYS_NICE"
+  security_opt:
+    - "seccomp=unconfined"
+  ulimit:
+    - "memlock=-1:-1"
+    - "nofile=65535:65535"
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  decode_context_parallel: 1
+  # max_model_len: 1048576
+  max_model_len: 262144
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  num_speculative_tokens: 7
+  kv_cache_memory_bytes: 8G
+  kv_cache_dtype: fp8
+  gpu_memory_utilization: 0.85
+  max_cudagraph_capture_size: 32
+
+env:
+  CUTE_DSL_ARCH: "sm_121a"
+  SAFETENSORS_FAST_GPU: "1"
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_ENABLE_PCIE_ALLREDUCE: "0"
+  # https://github.com/local-inference-lab/vllm/blob/6afb99982576a7a2eb53d667189e859629e22739/scripts/serve-glm53-flash-nvfp4-tp2-rdma.sh
+  VLLM_PLUGINS: "b12x_loader"
+  VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE: "512"
+  VLLM_GLM53_SPLIT_MAMBA_BLOCK_SIZE: "512"
+  VLLM_MXFP8_LM_HEAD: "1"
+  VLLM_LM_HEAD_A16: "1"
+  VLLM_MTP_NVFP4_LM_HEAD: "1"
+  VLLM_GDN_SPEC_DECODE_METADATA_FASTPATH: "1"
+  B12X_POLICY_MODE: "auto"
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --tensor-parallel-size {tensor_parallel} \
+    --pipeline-parallel-size {pipeline_parallel} \
+    --decode-context-parallel-size {decode_context_parallel} \
+    --mamba-cache-mode align \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --dtype bfloat16 \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --quantization modelopt_mixed \
+    --attention-backend B12X \
+    --block-size 512 \
+    --moe-backend b12x \
+    --linear-backend b12x \
+    --no-enable-flashinfer-autotune \
+    --load-format b12x \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-cudagraph-capture-size {max_cudagraph_capture_size} \
+    --speculative-config '{"method":"dflash","model":"incoai/GLM-5.3-Flash-DFlash2","num_speculative_tokens":{num_speculative_tokens},"kv_cache_dtype":"auto","draft_sample_method":"probabilistic","rejection_sample_method":"standard","draft_load_config":{"load_format":"fastsafetensors"}}' \
+    --kda-prefill-backend b12x \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --gpu-memory-utilization {gpu_memory_utilization}

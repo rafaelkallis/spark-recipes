@@ -1,0 +1,114 @@
+# https://github.com/technigmaai/glm-5.3-flash-nvfp4-2x-dgx-sparks
+
+recipe_version: 2
+model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
+runtime: vllm
+container: technigmaai/glm-5.3-flash-nvfp4-2x-dgx-sparks:r28.8-a-pr58454-pr58785-pr58779-pr58594-pr58450-arm64-sm121-cu134
+min_nodes: 2
+max_nodes: 2
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  decode_context_parallel: 1
+  gpu_memory_utilization: 0.87
+  # max_model_len: 1048576
+  # max_model_len: 1047552
+  max_model_len: 262144
+  kv_cache_dtype: fp8
+  # kv_cache_memory_bytes: 11840M
+  kv_cache_memory_bytes: 8192M
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  num_speculative_tokens: 3
+
+env:
+  DISPLAY_KV_ENABLE: "0"
+  # ---- GPU / arch (GB10 = sm_121) ----
+  TORCH_CUDA_ARCH_LIST: "12.1a"
+  FLASHINFER_CUDA_ARCH_LIST: "12.1f"
+  CUTE_DSL_ARCH: sm_121a
+  OMP_NUM_THREADS: "1"
+  # runtime
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+  VLLM_SSM_CONV_STATE_LAYOUT: DS
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: spawn
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
+  VLLM_PCIE_ALLREDUCE_BACKEND: "b12x"
+  VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "64"
+  VLLM_FLASHINFER_AUTOTUNE_DISTRIBUTED_SYNC: "0"
+  # Target/recurrent split-cache geometry for the qualified 1M profile.
+  # A present but empty value selects vLLM's generic cache allocator.
+  VLLM_PLUGINS: ""
+  B12X_POLICY_MODE: auto
+  B12X_AUTOTUNE_EXHAUSTIVE: "0"
+
+  # VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE: "1024"
+  # https://forums.developer.nvidia.com/t/glm-5-3-flash-320b-total-parameters-18b-active/381350/572#p-1868447-configurations-compared-3
+  VLLM_GLM53_SPLIT_TARGET_BLOCK_SIZE: "auto"
+  VLLM_GLM53_MTP_DRAFT_HEAD: "nvfp4"
+
+  INSTANTTENSOR_BACKEND: BUFFERED
+  INSTANTTENSOR_BUFFER_SIZE: "67108864"
+  INSTANTTENSOR_CHUNK_SIZE: "8388608"
+  INSTANTTENSOR_CONCURRENCY: "1"
+  INSTANTTENSOR_IO_DEPTH: "3"
+
+executor_config:
+  devices:
+    - "/dev/dri/card0"
+  cap_add:
+    - "IPC_LOCK"
+    - "SYS_NICE"
+  security_opt:
+    - "seccomp=unconfined"
+  ulimit:
+    - "memlock=-1:-1"
+    - "nofile=65535:65535"
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --distributed-executor-backend mp \
+    --tensor-parallel-size {tensor_parallel} \
+    --decode-context-parallel-size {decode_context_parallel} \
+    --cp-kv-cache-interleave-size 1 \
+    --dtype bfloat16 \
+    --quantization modelopt_mixed \
+    --moe-backend b12x \
+    --linear-backend b12x \
+    --attention-backend B12X --block-size 256 \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --no-enable-flashinfer-autotune \
+    --trust-remote-code \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --mamba-cache-mode align \
+    --kda-prefill-backend b12x \
+    --enable-prefix-caching \
+    --prefix-match-unit 128 \
+    --enable-prompt-tokens-details \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --enable-chunked-prefill \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":{num_speculative_tokens},"moe_backend":"marlin","attention_backend":"B12X","use_local_argmax_reduction":true,"disable_eagle_block_drop":true,"draft_sample_method":"greedy","rejection_sample_method":"standard"}' \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --limit-mm-per-prompt '{"image":32,"video":0}' \
+    --mm-processor-cache-gb 1 \
+    --async-scheduling \
+    --no-enable-flashinfer-autotune \
+    --load-format instanttensor
+
+

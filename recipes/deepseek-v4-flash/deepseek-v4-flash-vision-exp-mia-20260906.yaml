@@ -8,7 +8,7 @@ max_nodes: 2
 
 mods:
   - "@eugr/instanttensor-hybrid-draft-loader"
-  - mia-aa25c89-deepseek-v4-flash-vision-exp
+  - mia-aa25c89-20260906
 
 defaults:
   port: 8000

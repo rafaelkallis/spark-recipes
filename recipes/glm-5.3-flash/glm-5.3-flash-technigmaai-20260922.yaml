@@ -1,0 +1,57 @@
+# https://github.com/technigmaai/glm-5.3-flash-nvfp4-2x-dgx-sparks
+
+recipe_version: 2
+model: local-inference-lab/GLM-5.3-Flash-NVFP4-Spark
+runtime: vllm
+container: technigmaai/glm-5.3-flash-nvfp4-2x-dgx-sparks:r28-karmic-kraken-arm64-sm121-cu134
+min_nodes: 2
+max_nodes: 2
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: zai-org/GLM-5.3-Flash
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.85
+  max_model_len: 1048576
+  # max_model_len: 262144
+  kv_cache_dtype: fp8
+  kv_cache_memory_bytes: 9663676416
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  max_cudagraph_capture_size: 24
+  num_speculative_tokens: 5
+
+env:
+  GLM53_CONTEXT_CUDA_GRAPH: "1"
+  GLM53_GROUPED_CONTEXT_STORE: "1"
+  GLM53_FUSED_DFLASH_TAPS: "1"
+  GLM53_CONTEXT_GRAPH_CACHE_V2: "0"
+
+command: |
+  vllm serve {model} \
+    --host {host} \
+    --port {port} \
+    --distributed-executor-backend mp \
+    --tensor-parallel-size {tensor_parallel} \
+    --dtype bfloat16 \
+    --moe-backend b12x \
+    --linear-backend b12x \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --no-enable-flashinfer-autotune \
+    --trust-remote-code \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --mamba-cache-mode align \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-model-len {max_model_len} \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --block-size 256 \
+    --max-cudagraph-capture-size {max_cudagraph_capture_size} \
+    --max-num-seqs {max_num_seqs} \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":{num_speculative_tokens},"moe_backend":"auto"}' \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --served-model-name {served_model_name}

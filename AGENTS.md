@@ -69,6 +69,11 @@ the `vllm` runtime and typically declare:
 - For embedding/pooling recipes, cap `max_cudagraph_capture_size` to the expected
   batch-1 context (e.g. 256 for 4k context) — vLLM generates capture sizes up to that
   bound, so values past the max context only add startup time.
+- When speculative decoding is enabled, set `max_cudagraph_capture_size` to
+  `ceil(seqs × (k+1) / 8) × 8`, where `seqs` is `max_num_seqs` and `k` is the number
+  of speculative tokens. With speculative decoding each scheduled sequence can emit
+  `k+1` tokens per step, so capture sizes beyond `seqs × (k+1)` are never used and
+  only add startup time; rounding up to a multiple of 8 keeps vLLM's padding happy.
 - sparkrun's runtime cache is on by default (`/cache/runtime` in-container) and it
   already exports `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `FLASHINFER_WORKSPACE_BASE`/
   `FLASHINFER_CACHE_DIR`, `CUTE_DSL_CACHE_DIR`, `TORCH_HOME`, `TORCH_EXTENSIONS_DIR`,
