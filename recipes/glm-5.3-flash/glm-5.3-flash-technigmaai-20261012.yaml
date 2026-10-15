@@ -1,0 +1,276 @@
+# https://github.com/technigmaai/glm-5.3-flash-gb10-tp2-native @ 3a119df75e771374dacc3fb0f73373a0558aa84a (2026-10-10)
+#
+# Native TP2 derived from Kindling AI's published serving stack:
+#   image   technigmaai/glm-5.3-flash-gb10-tp2-native:c748079-displaykv1-arm64-cu130
+#   digest  sha256:46afd8bba26106aa7ea6e00f6fd4bd3ba3d0c7c49e86af85f269eb2c88c71fa5
+#           (vLLM 0.30.1rc1.dev193+gddd6fbca1, torch 2.13.0+cu130, FlashInfer 0.7.0)
+# All upstream env from compose + entrypoint defaults is resolved here; the
+# ~33 site-packages overlay bind mounts are staged per launch by the
+# technigmaai-native-3a119df mod (see mods/technigmaai-native-3a119df/README.md).
+
+recipe_version: 2
+metadata:
+  description: >-
+    GLM-5.3-Flash-NVFP4 on 2x DGX Spark (TP2) via technigmaai's native Kindling-derived
+    stack: DFlash2 k=7 speculation + adaptive-k scheduler + draft truncation +
+    RecoverSSM recurrent-state fix, ARX/ARXBig RoCE collectives, MegaMoE +
+    TileLang mHC kernels, NoPE sparse-MLA GB10 attention, dense FP8/W4
+    processing with processed-weight snapshots, flashinfer_cutlass MoE. All
+    overlays staged by the technigmaai-native-3a119df mod. Upstream C4 profile
+    (4 seqs / 4096 batched tokens / 8 GiB KV / 1M max_model_len).
+  maintainer: rafaelkallis
+  # sparkrun's generic MLA KV model over-counts this hybrid ~3.5x: GLM-5.3-Flash
+  # is KDA-linear-attention by layers (per-SEQ state, not per-token KV), so only
+  # 11 of 45 layers carry a per-token KV (kv_lora_rank 512) and the NoPE tail is
+  # 0 (qk_rope_head_dim: 0 — the "RoPE tail not counted" warning is vacuous
+  # here). Override with upstream's MEASURED pool: 8 GiB pin served
+  # 1,352,535 KV tokens at TP2 -> 8589934592 / 1352535 = 6350.99 bytes/token
+  # (indexer + draft pool included). Field unit is GiB per token — sparkrun
+  # multiplies the value by 1024^3 (models/vram.py per_token_bytes), so the
+  # constant is 6350.99 / 1073741824 = 0.000005914. MLA's latent cache is
+  # replicated per rank: sparkrun divides the override by PP only (PP=1 here),
+  # so the per-rank measured figure applies as-is.
+  kv_vram_per_token: 0.000005914
+
+model: nvidia/GLM-5.3-Flash-NVFP4
+model_revision: da920bb0b9f4a06727223a349e55468e38352348
+runtime: vllm-distributed
+container: technigmaai/glm-5.3-flash-gb10-tp2-native:c748079-displaykv1-arm64-cu130
+# Upstream validates exactly two native ranks (TP=2, one GPU per node).
+min_nodes: 2
+max_nodes: 2
+
+mods:
+  - technigmaai-native-3a119df
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  # Single served name on purpose: sparkrun folds served_model_name into its
+  # cluster identity (build_cluster_id_overrides) and benchmark name parsing,
+  # so keep it one token. Upstream also serves the raw HF id (compose
+  # MODEL_ALIASES = 'glm53 nvidia/GLM-5.3-Flash-NVFP4'); clients that call the
+  # HF id get a 404 here — append the alias to --served-model-name below if a
+  # client needs it.
+  served_model_name: glm53
+  tensor_parallel: 2
+  # 0.88 = upstream GPU_MEM_UTIL (TORCH_MEM_FRACTION 0.92 sets the worker ceiling above it).
+  gpu_memory_utilization: 0.88
+  # 1047552 = the model's 1M minus 1024; upstream .env default (validated with
+  # 1,352,535 shared KV tokens at 8 GiB).
+  max_model_len: 1047552
+  # fp8_e4m3, NOT "fp8": plain fp8 selects DeepSeek's pe_dim==64 fp8_ds_mla and
+  # hard-fails KV init on this NoPE sparse-MLA model. Measured-in by upstream.
+  kv_cache_dtype: fp8_e4m3
+  # 8 GiB/rank KV pin (upstream C4/C6 serving value; 9 GiB is their optional
+  # profile). With display-KV enabled, 1.75 GiB of this pin is recovered into
+  # display memory — it is part of, not additional to, the pool.
+  kv_cache_memory: 8589934592
+  # C4 = upstream fresh-install default. C6 alternative (both nodes, needs a
+  # matching snapshot directory):
+  #   max_num_batched_tokens: 6144
+  #   max_num_seqs: 6
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  # NO max_cudagraph_capture_size — a deliberate exception to the AGENTS.md
+  # capture-size formula, which targets fixed-k speculation. Here adaptive
+  # draft widths decode 1+k tokens per request per scheduled k, so the C4 rows
+  # ([[1,1,7]..[4,4,3]]) produce decode steps of 8/12/15/16 tokens, and vLLM
+  # adds those per-width sizes to its capture list only when it picks the
+  # ceiling itself (upstream entrypoint MoE-backend branch). An explicit cap
+  # leaves the 12/15-token steps running uncaptured — silently, nothing in the
+  # log. Upstream leaves the ceiling to vLLM on adaptive-width profiles: the
+  # capture list then runs to max_num_seqs x (1+k_max) x 2 = 64 (<= 512); the
+  # top families serve mixed decode+prefill steps and cost only capture time.
+  # 32 images / no video per prompt.
+  limit_mm: '{"image":32,"video":0}'
+  # DFlash2 drafter with rescue config: upstream SPEC + SPEC_EXTRA merged
+  # (disable_eagle_block_drop, TRITON_ATTN attention backend for the draft
+  # path, and the per-batch-size draft-width schedule). num_speculative_tokens
+  # is upstream SPEC_TOKENS=7 (the drafter's block size minus one; the model
+  # refuses other values).
+  speculative_config: '{"method":"dflash","model":"incoai/GLM-5.3-Flash-DFlash2","num_speculative_tokens":7,"revision":"bf582e4eacc1810f76656d1811693ff6c6737d2a","disable_eagle_block_drop":true,"attention_backend":"TRITON_ATTN","num_speculative_tokens_per_batch_size":[[1,1,7],[2,2,5],[3,3,4],[4,4,3],[5,5,2],[6,32,7]]}'
+
+env:
+  # ---- runtime ----
+  VLLM_ENGINE_READY_TIMEOUT_S: '3600'
+  VLLM_WORKER_MULTIPROC_METHOD: 'spawn'
+  MAX_JOBS: '4'
+  # Worker device-memory ceiling above the 0.88 utilization budget (matches
+  # upstream; consumed by the image's spark memory tracing + display-KV adjust).
+  TORCH_MEM_FRACTION: '0.92'
+  # Spark memory-trace stats: upstream writes to its /logs bind mount, which
+  # has no sparkrun counterpart; persist under the runtime cache instead (the
+  # mod pre-creates the directory on every launch, like the autotune wipe).
+  TORCH_MEM_STATS_DIR: /cache/runtime/torch-mem-stats
+  # ---- JIT / cache tiers (PYTORCH_CUDA_ALLOC_CONF and the
+  # VLLM_CACHE_ROOT/TRITON/FLASHINFER/CUTE_DSL/TORCH* caches are managed by
+  # sparkrun tiers — never re-declare them here) ----
+  # TileLang (mHC + DSA kernels) is NOT sparkrun-managed; $HOME default would
+  # be lost on recreate.
+  TILELANG_CACHE_DIR: /cache/runtime/tilelang
+  # Autotune cache stays ephemeral at TP>1 (upstream rule: a persisted one
+  # deadlocks the next boot); the mod wipes it every launch.
+  VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR: /tmp/flashinfer_autotune
+  # NCCL channel pin (upstream fabric tuning; NCCL's own choice was 64 channels
+  # while published GB10 recipes pin 4-12). Comm discovery (NCCL_IB_HCA/GID/
+  # SOCKET_IFNAME) stays sparkrun-managed — arx.py reads those from the env.
+  NCCL_MAX_NCHANNELS: '8'
+  # ---- adaptive-k scheduler + draft truncation (DFlash2 width control) ----
+  VLLM_ADAPTIVE_K_CODE_MODE: 'gated'
+  VLLM_ADAPTIVE_K_CONTROL: /cache/runtime/adaptive-k-control
+  VLLM_ADAPTIVE_K_COST_MS: '2:29.7,3:33.1,4:36.5,5:39.8,6:43.1,7:46.0,8:48.9'
+  VLLM_ADAPTIVE_K_MODEL: '32.1,1.32,0.427'
+  VLLM_ADAPTIVE_K_ONLINE: '1'
+  VLLM_ADAPTIVE_K_PER_REQUEST: '0'
+  VLLM_DRAFT_TRUNC_CONTROL: /cache/runtime/draft-trunc-control
+  VLLM_DRAFT_TRUNC_EXPLORE: '4'
+  VLLM_DRAFT_TRUNC_TAU: '0.3'
+  # ---- GLM5next KV / recurrent-state features ----
+  # Drafter KV in its own pool; RecoverSSM keeps one KDA state per request.
+  VLLM_GLM5NEXT_DRAFT_POOL: '1'
+  VLLM_GLM5NEXT_RECOVERSSM: '1'
+  VLLM_TRITON_SPARSE_MLA: '1'
+  # ---- sequence-parallel prefill (SP overlay envs) ----
+  VLLM_GLM_ARX_PREFETCH: '1'
+  VLLM_GLM_SP_FP8_GATHER: '1'
+  VLLM_GLM_SP_MIN_TOKENS: '1024'
+  VLLM_GLM_SP_MOE_CHECK: '0'
+  VLLM_GLM_SP_MOE_FUSED: '1'
+  VLLM_GLM_SP_MOE_QUANT_GATHER: '1'
+  VLLM_GLM_SP_TP: '1'
+  # ---- ARX / ARXBig collectives (RoCE; replaces vLLM custom allreduce) ----
+  VLLM_ARX_ALLREDUCE: '1'
+  VLLM_ARXBIG: '1'
+  VLLM_ARXBIG_RS: '1'
+  VLLM_ARXBIG_AG: '0'
+  VLLM_ARX_TWO_SHOT_MAX_KB: '2048'
+  # ---- MegaMoE kernels + fused mHC prenorm (TileLang) ----
+  VLLM_MEGAMOE: '1'
+  VLLM_MEGAMOE_MAX_TOKENS: '8'
+  VLLM_MEGAMOE_VARIANT: '20'
+  VLLM_MHC_FUSED_MAX_TOKENS: '32'
+  VLLM_MOE_PREFILL: '1'
+  VLLM_MOE_PREFILL_CHECK: '0'
+  VLLM_MOE_PREFILL_MIN_TOKENS: '1024'
+  VLLM_MOE_PREFILL_Y8: '1'
+  # ---- dense FP8/W4 processing + processed-weight snapshot cache ----
+  # VLLM_DENSE_W4 comes from upstream compose verbatim ($$ in compose == $ here).
+  VLLM_DENSE_FP8: '1'
+  VLLM_DENSE_FP8_LM_HEAD: '1'
+  VLLM_DENSE_W4: 'in_proj_qkvbfg_a$|^model\.|self_attn\.o_proj$|shared_experts\.(gate_up_proj|down_proj)$'
+  # Snapshot dir is the big disk spend: first TP2 boot writes ~96 GiB/rank of
+  # processed target+drafter weights under /cache/runtime (fast boots after).
+  # Tag must stay in lockstep with the processing stack (upstream value).
+  VLLM_WEIGHT_SNAPSHOT_DIR: /cache/runtime/weight-snapshots
+  VLLM_WEIGHT_SNAPSHOT_TAG: 'fp8w4c-2026-09-28'
+  VLLM_WEIGHT_SNAPSHOT_NORMAL: '1'
+  # ---- display-backed KV: OFF by default ----
+  # The 1.75 GiB display reserve needs host /dev/dri/card0 (executor_config
+  # devices), the DRM gid group, a stopped display manager and nvidia_drm
+  # modeset — headless sparkrun clusters are not assumed to have any of these.
+  # The staged worker utils fall back to ordinary allocation when disabled.
+  # To enable: set GLM53_DISPLAY_KV_ENABLE: '1' and add
+  #   devices: ["/dev/dri/card0"]  (under executor_config) on every node.
+  # Upstream also grants the container its DRM gid (compose group_add
+  # ${DRM_CARD_GID:-44}); without it the device node opens EPERM even with
+  # the device bound. sparkrun's executor schema has no group_add key yet, so
+  # the enable path also needs its own (sparkrun-side) workaround.
+  GLM53_DISPLAY_KV_ENABLE: '0'
+  GLM53_DISPLAY_KV_MIN_BYTES: '4294967296'
+
+executor_config:
+  # Don't let a image ENTRYPOINT wrap the serve command.
+  entrypoint: ""
+  cap_add:
+    - "IPC_LOCK"
+    - "SYS_NICE"
+  security_opt:
+    - "seccomp=unconfined"
+  ulimit:
+    # These three restate sparkrun's rootless docker defaults; the ulimit list
+    # REPLACES that default list rather than merging, so every member the
+    # recipe omits silently reverts to the Docker daemon default (stack ->
+    # 8 MiB). sparkrun's own rootless profile carries stack=67108864 and so
+    # does upstream compose — keep it here too.
+    - "memlock=-1:-1"
+    - "stack=67108864:67108864"
+    - "nofile=65535:65535"
+    # Upstream also zeroes core dumps (compose ulimits core: 0): the silent
+    # worker-death class would otherwise write a tens-of-GB core onto the
+    # overlay fs before anyone notices.
+    - "core=0:0"
+
+command: |
+  vllm serve {model} \
+    --revision {model_revision} \
+    --host {host} \
+    --port {port} \
+    --served-model-name {served_model_name} \
+    --tensor-parallel-size {tensor_parallel} \
+    --distributed-executor-backend mp \
+    --trust-remote-code \
+    --load-format auto \
+    --safetensors-load-strategy eager \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --override-generation-config '{"max_new_tokens":null}' \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --block-size 2304 \
+    --kv-cache-memory {kv_cache_memory} \
+    --enable-prefix-caching \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --long-prefill-token-threshold 2304 \
+    --moe-backend flashinfer_cutlass \
+    --limit-mm-per-prompt '{limit_mm}' \
+    --mm-processor-cache-gb 1 \
+    --chat-template /opt/glm53-native/chat_template.jinja \
+    --scheduler-cls vllm.v1.core.sched.adaptive_k.AdaptiveKScheduler \
+    --enable-auto-tool-choice --tool-call-parser glm47 \
+    --reasoning-parser glm45 \
+    --sparse-indexer-topk-backend per_row \
+    --speculative-config '{speculative_config}'
+
+# Notes:
+# - JSON-valued flags MUST be single-quoted in this template —
+#   '{limit_mm}', '{speculative_config}', and the literal
+#   --override-generation-config JSON. sparkrun splices {placeholder} values
+#   verbatim into the command and hands it to bash (the cluster flow
+#   materializes the render into /tmp/sparkrun_serve.sh and runs it with
+#   `bash --noprofile --norc`), and bash brace-expands every unquoted
+#   comma-bearing brace group: `--limit-mm-per-prompt {"image":32,"video":0}`
+#   would reach vLLM as three words. The defaults stay as bare JSON strings —
+#   sparkrun's drafter pre-sync json.loads them, so literal quote characters
+#   belong in the template, not in the defaults.
+# - sparkrun appends --nnodes/--node-rank/--master-addr/--headless for the TP2
+#   pair and manages the RoCE/NCCL comm env; never add those here.
+# - The command mirrors upstream files/entrypoint.sh (compose env resolved) so
+#   that every "empty means default in the entrypoint" value above is explicit:
+#   SPEC=dflash with k=7, moe flashinfer_cutlass, vLLM-owned graph ceiling (see
+#   the defaults comment), 2304-long-prefill share (one KDA block), chat
+#   template from the mod, glm47/glm45 parsers, per_row sparse-indexer top-k.
+# - sparkrun pre-syncs the drafter from the speculative_config model field; the
+#   revision is pinned in the same JSON. incoai/GLM-5.3-Flash-DFlash2 is CC
+#   BY-NC-ND — cache locally, do not redistribute derived copies.
+# - Decode path is adaptive-width: the per-batch-size schedule picks k from 7
+#   down to 2 as batch grows (rows [[1,1,7]..[6,32,7]]). The CUDA graph ceiling
+#   is left to vLLM — with adaptive widths it adds the per-width decode sizes
+#   (8/12/15/16 tokens at C4) to its capture list only when it computes the
+#   ceiling itself, so no explicit --max-cudagraph-capture-size is passed.
+#   Confirm the captured list on first boot (the "capturing cudagraphs" log
+#   line); decode steps without a captured graph run eager with no warning.
+# - First boot on a node: cold load ~25 min + JIT (arx/megamoe/tilelang) +
+#   FlashInfer autotune ~2 min + processed-weight snapshot build (~96 GiB disk,
+#   needs /cache/runtime free space). Later boots reuse TRITON/TileLang/VLLM
+#   caches and the snapshot and are much faster.
+# - Upstream host-RAM profile: ~182/2 + 8 + 30 GiB free per node at TP2 (~123
+#   GiB) — the same-family silent-worker-death on RAM pressure seen with the
+#   tonyd2wild stack (2026-10-06) applies to any 8 GiB pin build here; watch
+#   MemAvailable/swap before large prefills.
+# - NOT set on purpose: VLLM_HOST_IP/HEAD_HOST/FABRIC_SUBNETS/NCCL_* sockets
+#   (sparkrun-owned), plain "fp8" kv dtype (crashes KV init here — fp8_e4m3 only),
+#   --disable-custom-all-reduce (ARX carries the TP2 collective),
+#   --enforce-eager (marlin-era convention; flashinfer_cutlass captures graphs),
+#   and the entrypoint-only knobs (status server, self-test, fabric-check,
+#   ALLOW_STOCK — the mod always stages overlays; sparkrun owns health checks).

@@ -57,7 +57,8 @@ the `vllm` runtime and typically declare:
 - Keep a `metadata` block with a concise `description` and `maintainer`.
 - Follow the existing style: `model`, `runtime`, `container`, `defaults`, `env`,
   `command`.
-- Prefer `.yml` consistently (existing files use `.yml`).
+- Prefer `.yaml` consistently (every existing recipe file uses `.yaml`; there
+  are no `.yml` files).
 - Do NOT invent models, containers, or paths that do not exist. Verify HF model ids,
   container tags, and cache keys against the actual repo contents.
 - When adding commented-out alternatives (e.g. multiple container tags or speculative
@@ -74,6 +75,14 @@ the `vllm` runtime and typically declare:
   of speculative tokens. With speculative decoding each scheduled sequence can emit
   `k+1` tokens per step, so capture sizes beyond `seqs × (k+1)` are never used and
   only add startup time; rounding up to a multiple of 8 keeps vLLM's padding happy.
+- Exception to the formula above: when `speculative_config` carries an adaptive
+  per-batch-size draft-width schedule (`num_speculative_tokens_per_batch_size`,
+  e.g. the technigmaai-native adaptive-k rows), do NOT set
+  `max_cudagraph_capture_size`. vLLM adds the per-width decode sizes (steps of
+  e.g. 8/12/15/16 tokens as k varies) to its capture list only when it computes
+  the ceiling itself; an explicit cap silently leaves the intermediate-width
+  steps running uncaptured. Leave the flag off and let vLLM own the capture
+  list — what upstream's technigmaai native entrypoint does for that case.
 - sparkrun's runtime cache is on by default (`/cache/runtime` in-container) and it
   already exports `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `FLASHINFER_WORKSPACE_BASE`/
   `FLASHINFER_CACHE_DIR`, `CUTE_DSL_CACHE_DIR`, `TORCH_HOME`, `TORCH_EXTENSIONS_DIR`,
