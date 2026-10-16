@@ -24,8 +24,8 @@ metadata:
     per upstream issue #6), MegaMoE + TileLang mHC kernels, NoPE sparse-MLA GB10
     attention, dense FP8/W4 processing with processed-weight snapshots,
     flashinfer_cutlass MoE. All overlays staged by the technigmaai-native-34ecd2f
-    mod. Upstream C4 profile (4 seqs / 4096 batched tokens / 8 GiB KV / 1M
-    max_model_len).
+    mod. Upstream C6 profile (6 seqs / 6144 batched tokens / 8 GiB KV / 1M
+    max_model_len; C4 = their fresh-install default).
   maintainer: rafaelkallis
   # sparkrun's generic MLA KV model over-counts this hybrid ~3.5x: GLM-5.3-Flash
   # is KDA-linear-attention by layers (per-SEQ state, not per-token KV), so only
@@ -75,22 +75,22 @@ defaults:
   # profile). With display-KV enabled, 1.75 GiB of this pin is recovered into
   # display memory — it is part of, not additional to, the pool.
   kv_cache_memory: 8589934592
-  # C4 = upstream fresh-install default. C6 alternative (both nodes, needs a
-  # matching snapshot directory):
-  #   max_num_batched_tokens: 6144
-  #   max_num_seqs: 6
-  max_num_seqs: 4
-  max_num_batched_tokens: 4096
+  # C6 profile (both nodes). Alternative C4 = upstream fresh-install default
+  # (needs a matching snapshot directory):
+  #   max_num_batched_tokens: 4096
+  #   max_num_seqs: 4
+  max_num_seqs: 6
+  max_num_batched_tokens: 6144
   # NO max_cudagraph_capture_size — a deliberate exception to the AGENTS.md
   # capture-size formula, which targets fixed-k speculation. Here adaptive
-  # draft widths decode 1+k tokens per request per scheduled k, so the C4 rows
-  # ([[1,1,7]..[4,4,3]]) produce decode steps of 8/12/15/16 tokens, and vLLM
-  # adds those per-width sizes to its capture list only when it picks the
+  # draft widths decode 1+k tokens per request per scheduled k, and vLLM adds
+  # those per-width sizes to its capture list only when it picks the
   # ceiling itself (upstream entrypoint MoE-backend branch). An explicit cap
   # leaves the 12/15-token steps running uncaptured — silently, nothing in the
   # log. Upstream leaves the ceiling to vLLM on adaptive-width profiles: the
-  # capture list then runs to max_num_seqs x (1+k_max) x 2 = 64 (<= 512); the
-  # top families serve mixed decode+prefill steps and cost only capture time.
+  # capture list then runs to max_num_seqs x (1+k_max) x 2 = 96 at C6 (64 at
+  # C4; <= 512); the top families serve mixed decode+prefill steps and cost
+  # only capture time.
   # 32 images / no video per prompt.
   limit_mm: '{"image":32,"video":0}'
   # DFlash2 drafter with rescue config: upstream SPEC + SPEC_EXTRA merged
@@ -279,7 +279,7 @@ command: |
 # - Decode path is adaptive-width: the per-batch-size schedule picks k from 7
 #   down to 2 as batch grows (rows [[1,1,7]..[6,32,7]]). The CUDA graph ceiling
 #   is left to vLLM — with adaptive widths it adds the per-width decode sizes
-#   (8/12/15/16 tokens at C4) to its capture list only when it computes the
+#   per-width decode sizes to its capture list only when it computes the
 #   ceiling itself, so no explicit --max-cudagraph-capture-size is passed.
 #   Confirm the captured list on first boot (the "capturing cudagraphs" log
 #   line); decode steps without a captured graph run eager with no warning.
