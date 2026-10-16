@@ -107,13 +107,17 @@ env:
   # Worker device-memory ceiling above the 0.88 utilization budget (matches
   # upstream; consumed by the image's spark memory tracing + display-KV adjust).
   TORCH_MEM_FRACTION: '0.92'
+  # CUDA allocator: upstream entrypoint sets this unconditionally — on unified
+  # memory a caching-allocator segment IS host RAM, and the stock laddering
+  # strands freed blocks (expandable_segments grows one segment instead).
+  PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True'
   # Spark memory-trace stats: upstream writes to its /logs bind mount, which
   # has no sparkrun counterpart; persist under the runtime cache instead (the
   # mod pre-creates the directory on every launch, like the autotune wipe).
   TORCH_MEM_STATS_DIR: /cache/runtime/torch-mem-stats
-  # ---- JIT / cache tiers (PYTORCH_CUDA_ALLOC_CONF and the
-  # VLLM_CACHE_ROOT/TRITON/FLASHINFER/CUTE_DSL/TORCH* caches are managed by
-  # sparkrun tiers — never re-declare them here) ----
+  # ---- JIT / cache tiers (the VLLM_CACHE_ROOT/TRITON/FLASHINFER/CUTE_DSL/
+  # TORCH* caches are managed by sparkrun tiers — never re-declare them here;
+  # PYTORCH_CUDA_ALLOC_CONF is an allocator setting, set in `env` above) ----
   # TileLang (mHC + DSA kernels) is NOT sparkrun-managed; $HOME default would
   # be lost on recreate.
   TILELANG_CACHE_DIR: /cache/runtime/tilelang
@@ -229,7 +233,7 @@ command: |
     --distributed-executor-backend mp \
     --trust-remote-code \
     --load-format auto \
-    --safetensors-load-strategy eager \
+    --safetensors-load-strategy lazy \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --max-model-len {max_model_len} \
     --override-generation-config '{"max_new_tokens":null}' \
