@@ -56,11 +56,12 @@ defaults:
   host: 0.0.0.0
   # Single served name on purpose: sparkrun folds served_model_name into its
   # cluster identity (build_cluster_id_overrides) and benchmark name parsing,
-  # so keep it one token. Upstream also serves the raw HF id (compose
-  # MODEL_ALIASES = 'glm53 nvidia/GLM-5.3-Flash-NVFP4'); clients that call the
-  # HF id get a 404 here — append the alias to --served-model-name below if a
+  # so keep it one token. Matches the sibling technigmaai (compose-lane)
+  # recipes. Upstream also serves `glm53` and the checkpoint id (compose
+  # MODEL_ALIASES = 'glm53 nvidia/GLM-5.3-Flash-NVFP4'); clients that call
+  # those get a 404 here — append the alias to --served-model-name below if a
   # client needs it.
-  served_model_name: glm53
+  served_model_name: zai-org/GLM-5.3-Flash
   tensor_parallel: 2
   # 0.88 = upstream GPU_MEM_UTIL (TORCH_MEM_FRACTION 0.92 sets the worker ceiling above it).
   gpu_memory_utilization: 0.88
