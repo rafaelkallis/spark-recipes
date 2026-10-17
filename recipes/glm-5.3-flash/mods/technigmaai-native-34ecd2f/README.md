@@ -104,8 +104,12 @@ carries the full set; key notes:
   ranks, rendezvous and the RoCE comm env (`NCCL_IB_*`, sockets), and `arx.py`
   reads those sparkrun-provided values directly.
 - `SNAPSHOT_SEED_DIR` bind + `VLLM_WEIGHT_SNAPSHOT_SEED_DIR`: the snapshot
-  selector treats an unset seed dir as "none" and
-  `VLLM_WEIGHT_SNAPSHOT_NORMAL=1` skips the seed lookup entirely.
+  selector treats an unset seed dir as "none", so no recipe env is needed to
+  skip seeding. Do NOT set `VLLM_WEIGHT_SNAPSHOT_NORMAL=1`: per base_loader.py
+  it is a diagnostic mode ("load, dump, no save") that gates BOTH
+  `snapshot.save()` and the restore branch on `not normal`, silently disabling
+  the whole feature. (The recipes originally set it; removed 2026-10-17 after
+  live logs showed no snapshot was ever written.)
 - `ALLOW_STOCK` gate, model aliases beyond the served name, tool-parser
   fail-closed plugin (upstream ships it, only for degraded upstream stacks).
 
